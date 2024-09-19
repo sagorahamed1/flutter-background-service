@@ -1,17 +1,18 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:stop_watch_timer/stop_watch_timer.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+final StopWatchTimer _stopWatchTimer = StopWatchTimer(mode: StopWatchMode.countUp);
 
 const AndroidNotificationChannel notificationChannel = AndroidNotificationChannel(
-  "coding_is_life_foreground", // চ্যানেলের ইউনিক আইডি
-  "Coding is Life Foreground", // ব্যবহারকারীর জন্য বন্ধুত্বপূর্ণ নাম
-  description: "This channel is used for foreground service notifications",
+  "stopwatch_foreground",
+  "Stopwatch Foreground",
+  description: "This channel is used for stopwatch notifications",
   importance: Importance.high,
 );
 
@@ -24,54 +25,69 @@ void main() async {
 Future<void> initService() async {
   var service = FlutterBackgroundService();
 
+  // Initialize local notifications
   if (Platform.isIOS) {
     await flutterLocalNotificationsPlugin.initialize(
       const InitializationSettings(iOS: DarwinInitializationSettings()),
     );
   }
 
-  await flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(notificationChannel);
 
+  // Configure the background service
   await service.configure(
-    iosConfiguration: IosConfiguration(onBackground: iosBackground, onForeground: onStart),
+    iosConfiguration: IosConfiguration(
+      onBackground: iosBackground,
+      onForeground: onStart,
+    ),
     androidConfiguration: AndroidConfiguration(
       onStart: onStart,
       isForegroundMode: true,
       autoStart: true,
       notificationChannelId: notificationChannel.id,
-      initialNotificationTitle: "Coding Life Service",
-      initialNotificationContent: "Awesome content",
-      foregroundServiceNotificationId: 90,
+      initialNotificationTitle: "Stopwatch Service",
+      initialNotificationContent: "Counting time...",
+      foregroundServiceNotificationId: 100,
     ),
   );
+
+  service.startService(); // Ensure the service starts
 }
 
-/// সার্ভিস শুরু করার জন্য পদ্ধতি
 @pragma("vm:entry-point")
 void onStart(ServiceInstance service) {
   DartPluginRegistrant.ensureInitialized();
 
-  Timer.periodic(const Duration(seconds: 2), (timer) {
-    flutterLocalNotificationsPlugin.show(
-      90,
-      "Cool Service",
-      "Awesome ${DateTime.now()}",
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          notificationChannel.id,
-          notificationChannel.name,
-          // description: "notificationChannel.description",
-          ongoing: true,
-          importance: Importance.high,
-          icon: "app_icon"
+  _stopWatchTimer.onStartTimer();
+
+  Timer.periodic(const Duration(seconds: 1), (timer) {
+    // if (service.) {
+    //   _stopWatchTimer.onStopTimer();
+    //   timer.cancel();
+    // } else {
+      final currentTime = _stopWatchTimer.rawTime.value;
+      final displayTime = StopWatchTimer.getDisplayTime(currentTime, hours: true, milliSecond: false);
+
+      flutterLocalNotificationsPlugin.show(
+        100,
+        "Stopwatch Running",
+        displayTime,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            notificationChannel.id,
+            notificationChannel.name,
+            ongoing: true,
+            importance: Importance.high,
+            icon: "app_icon",
+          ),
         ),
-      ),
-    );
+      );
+    // }
   });
 }
 
-/// iOS ব্যাকগ্রাউন্ড টাস্ক হ্যান্ডলার
 @pragma("vm:entry-point")
 Future<bool> iosBackground(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,20 +96,81 @@ Future<bool> iosBackground(ServiceInstance service) async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Background Service',
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Background Service Example'),
-        ),
-        body: Center(
-          child: Text('Background service is running!'),
+      title: 'Stopwatch Background Service',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: const StopwatchScreen(),
+    );
+  }
+}
+
+class StopwatchScreen extends StatefulWidget {
+  const StopwatchScreen({super.key});
+
+  @override
+  State<StopwatchScreen> createState() => _StopwatchScreenState();
+}
+
+class _StopwatchScreenState extends State<StopwatchScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _stopWatchTimer.rawTime.listen((value) {
+      setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Stopwatch with Background Service'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            StreamBuilder<int>(
+              stream: _stopWatchTimer.rawTime,
+              initialData: _stopWatchTimer.rawTime.value,
+              builder: (context, snapshot) {
+                final value = snapshot.data!;
+                final displayTime = StopWatchTimer.getDisplayTime(value, hours: true, milliSecond: false);
+                return Text(
+                  displayTime,
+                  style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold),
+                );
+              },
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                _stopWatchTimer.onStartTimer();
+              },
+              child: const Text('Start Stopwatch'),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                _stopWatchTimer.onStopTimer();
+              },
+              child: const Text('Stop Stopwatch'),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _stopWatchTimer.dispose();
+    super.dispose();
   }
 }
